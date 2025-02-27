@@ -2,8 +2,8 @@ from __future__ import annotations
 import os
 import torch
 import numpy as np
-from typing import Optional, List, Annotated, ClassVar, Callable, Any, Tuple, Union
-from pydantic import BaseModel, validator, root_validator, Field
+from typing import Optional, List, Annotated, ClassVar, Callable, Any, Tuple, Union, Dict
+from pydantic import BaseModel, validator, root_validator, Field, field_validator, ConfigDict, model_validator, model_serializer
 from PIL import Image
 from logging import Logger
 from copy import copy
@@ -49,15 +49,15 @@ def parse_value(value: str) -> Union[str, float, int, bool]:
         except ValueError:
             return value  # Plain string.
 
-
 class ControlNetUnit(BaseModel):
     """
     Represents an entire ControlNet processing unit.
     """
 
-    class Config:
-        arbitrary_types_allowed = True
-        extra = "ignore"
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="ignore"
+    )
 
     cls_match_module: ClassVar[Callable[[str], bool]] = _unimplemented_func
     cls_match_model: ClassVar[Callable[[str], bool]] = _unimplemented_func
@@ -77,7 +77,8 @@ class ControlNetUnit(BaseModel):
     enabled: bool = False
     module: str = "none"
 
-    @validator("module", always=True, pre=True)
+    @field_validator("module", always=True, pre=True)
+    @classmethod
     def check_module(cls, value: str) -> str:
         if not ControlNetUnit.cls_match_module(value):
             raise ValueError(f"module({value}) not found in supported modules.")
@@ -85,7 +86,8 @@ class ControlNetUnit(BaseModel):
 
     model: str = "None"
 
-    @validator("model", always=True, pre=True)
+    @field_validator("model", always=True, pre=True)
+    @classmethod
     def check_model(cls, value: str) -> str:
         if not ControlNetUnit.cls_match_model(value):
             raise ValueError(f"model({value}) not found in supported models.")
@@ -98,7 +100,8 @@ class ControlNetUnit(BaseModel):
 
     resize_mode: ResizeMode = ResizeMode.INNER_FIT
 
-    @validator("resize_mode", always=True, pre=True)
+    @field_validator("resize_mode", always=True, pre=True)
+    @classmethod
     def check_resize_mode(cls, value) -> ResizeMode:
         resize_mode_aliases = {
             "Inner Fit (Scale to Fit)": "Crop and Resize",
@@ -116,7 +119,7 @@ class ControlNetUnit(BaseModel):
     threshold_a: float = -1
     threshold_b: float = -1
 
-    @root_validator
+    @model_validator(mode="before")
     def bound_check_params(cls, values: dict) -> dict:
         """
         Checks and corrects negative parameters in ControlNetUnit 'unit' in place.
@@ -151,7 +154,7 @@ class ControlNetUnit(BaseModel):
     guidance_start: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
     guidance_end: Annotated[float, Field(ge=0.0, le=1.0)] = 1.0
 
-    @root_validator
+    @model_validator(mode="before")
     def guidance_check(cls, values: dict) -> dict:
         start = values.get("guidance_start")
         end = values.get("guidance_end")
@@ -192,7 +195,8 @@ class ControlNetUnit(BaseModel):
     # The effective region mask that unit's effect should be restricted to.
     effective_region_mask: Optional[np.ndarray] = None
 
-    @validator("effective_region_mask", pre=True)
+    @field_validator("effective_region_mask", pre=True)
+    @classmethod
     def parse_effective_region_mask(cls, value) -> np.ndarray:
         if isinstance(value, str):
             return cls.cls_decode_base64(value)
@@ -215,7 +219,8 @@ class ControlNetUnit(BaseModel):
     # Currently the option is only accessible in API calls.
     ipadapter_input: Optional[List[Any]] = None
 
-    @validator("ipadapter_input", pre=True)
+    @field_validator("ipadapter_input", pre=True)
+    @classmethod
     def parse_ipadapter_input(cls, value) -> Optional[List[Any]]:
         if value is None:
             return None
@@ -315,30 +320,20 @@ class ControlNetUnit(BaseModel):
             )
         return np.concatenate([np_image, np_mask], axis=2)  # [H, W, 4]
 
+    @model_validator(mode="before")
     @classmethod
-    def legacy_field_alias(cls, values: dict) -> dict:
-        ext_compat_keys = {
-            "guidance": "guidance_end",
-            "lowvram": "low_vram",
-            "input_image": "image",
-        }
-        for alias, key in ext_compat_keys.items():
+    def legacy_field_alias(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        for alias, key in cls.ext_compat_keys.items():
             if alias in values:
-                assert key not in values, f"Conflict of field '{alias}' and '{key}'"
-                values[key] = values[alias]
-                cls.cls_logger.warn(
-                    f"Deprecated alias '{alias}' detected. This field will be removed on 2024-06-01"
-                    f"Please use '{key}' instead."
-                )
-
+                if key in values:
+                    raise ValueError(f"Conflict of field '{alias}' and '{key}'")
+                values[key] = values.pop(alias)
+                print(f"Deprecated alias '{alias}' detected. Use '{key}' instead.")
         return values
 
+    @model_validator(mode="before")
     @classmethod
-    def mask_alias(cls, values: dict) -> dict:
-        """
-        Field "mask_image" is the alias of field "mask".
-        This is for compatibility with SD Forge API.
-        """
+    def mask_alias(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         mask_image = values.get("mask_image")
         mask = values.get("mask")
         if mask_image is not None:
@@ -348,23 +343,6 @@ class ControlNetUnit(BaseModel):
         return values
 
     def get_input_images_rgba(self) -> Optional[List[np.ndarray]]:
-        """
-        RGBA images with potentially different size.
-        Why we cannot have [B, H, W, C=4] here is that calculation of final
-        resolution requires generation target's dimensions.
-
-        Parse image with following formats.
-        API
-        - image = {"image": base64image, "mask": base64image,}
-        - image = [image, mask]
-        - image = (image, mask)
-        - image = [{"image": ..., "mask": ...}, {"image": ..., "mask": ...}, ...]
-        - image = base64image, mask = base64image
-
-        UI:
-        - image = {"image": np_image, "mask": np_image,}
-        - image = np_image, mask = np_image
-        """
         init_image = self.image
         init_mask = self.mask
 
@@ -376,29 +354,14 @@ class ControlNetUnit(BaseModel):
             if not init_image:
                 raise ValueError(f"{init_image} is not a valid 'image' field value")
             if isinstance(init_image[0], dict):
-                # [{"image": ..., "mask": ...}, {"image": ..., "mask": ...}, ...]
                 images = init_image
             else:
                 assert len(init_image) == 2
-                # [image, mask]
-                # (image, mask)
-                images = [
-                    {
-                        "image": init_image[0],
-                        "mask": init_image[1],
-                    }
-                ]
+                images = [{"image": init_image[0], "mask": init_image[1]}]
         elif isinstance(init_image, dict):
-            # {"image": ..., "mask": ...}
             images = [init_image]
         elif isinstance(init_image, (str, np.ndarray)):
-            # image = base64image, mask = base64image
-            images = [
-                {
-                    "image": init_image,
-                    "mask": init_mask,
-                }
-            ]
+            images = [{"image": init_image, "mask": init_mask}]
         else:
             raise ValueError(f"Unrecognized image field {init_image}")
 
@@ -411,72 +374,50 @@ class ControlNetUnit(BaseModel):
 
             np_image = self.parse_image(image)
             np_mask = self.parse_image(mask) if mask is not None else None
-            np_images.append(
-                self.combine_image_and_mask(np_image, np_mask)
-            )  # [H, W, 4]
-
+            np_images.append(self.combine_image_and_mask(np_image, np_mask))
         return np_images
 
     @classmethod
-    def from_dict(cls, values: dict) -> ControlNetUnit:
-        values = copy(values)
-        values = cls.legacy_field_alias(values)
-        values = cls.mask_alias(values)
-        return ControlNetUnit(**values)
+    def from_dict(cls, values: Dict[str, Any]) -> "ControlNetUnit":
+        return cls.model_validate(values)
 
     @classmethod
-    def from_infotext_args(cls, *args) -> ControlNetUnit:
-        assert len(args) == len(ControlNetUnit.infotext_fields())
-        return cls.from_dict(
-            {k: v for k, v in zip(ControlNetUnit.infotext_fields(), args)}
-        )
+    def from_infotext_args(cls, *args) -> "ControlNetUnit":
+        assert len(args) == len(cls.infotext_fields())
+        return cls.from_dict({k: v for k, v in zip(cls.infotext_fields(), args)})
 
     @staticmethod
-    def infotext_fields() -> Tuple[str]:
-        """Fields that should be included in infotext.
-        You should define a Gradio element with exact same name in ControlNetUiGroup
-        as well, so that infotext can wire the value to correct field when pasting
-        infotext.
-        """
+    def infotext_fields() -> Tuple[str, ...]:
         return (
-            "module",
-            "model",
-            "weight",
-            "resize_mode",
-            "processor_res",
-            "threshold_a",
-            "threshold_b",
-            "guidance_start",
-            "guidance_end",
-            "pixel_perfect",
-            "control_mode",
+            "module", 
+            "model", 
+            "weight", 
+            "resize_mode", 
+            "processor_res", 
+            "threshold_a", 
+            "threshold_b", 
+            "guidance_start", 
+            "guidance_end", 
+            "pixel_perfect", 
+            "control_mode"
         )
 
+    @model_serializer()
     def serialize(self) -> str:
-        """Serialize the unit for infotext."""
         infotext_dict = {
-            field_to_displaytext(field): serialize_value(getattr(self, field))
-            for field in ControlNetUnit.infotext_fields()
+            field: str(getattr(self, field)) for field in self.infotext_fields()
         }
-        if not all(
-            "," not in str(v) and ":" not in str(v) for v in infotext_dict.values()
-        ):
-            self.cls_logger.error(f"Unexpected tokens encountered:\n{infotext_dict}")
-            return ""
-
-        return ", ".join(f"{field}: {value}" for field, value in infotext_dict.items())
+        return ", ".join(f"{key}: {value}" for key, value in infotext_dict.items())
 
     @classmethod
-    def parse(cls, text: str) -> ControlNetUnit:
-        return ControlNetUnit(
-            enabled=True,
+    def parse(cls, text: str) -> "ControlNetUnit":
+        return cls(
             **{
-                displaytext_to_field(key): parse_value(value)
+                key.strip(): value.strip()
                 for item in text.split(",")
-                for (key, value) in (item.strip().split(": "),)
-            },
+                for (key, value) in (item.split(": ", 1),)
+            }
         )
 
-    def __copy__(self) -> ControlNetUnit:
-        """Override the behavior on `copy.copy` calls."""
-        return self.copy()
+    def __copy__(self) -> "ControlNetUnit":
+        return self.model_copy()
