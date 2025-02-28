@@ -299,13 +299,6 @@ class ControlNetUiGroup(object):
                                 elem_id=f"{elem_id_tabname}_{tabname}_input_image",
                                 elem_classes=["cnet-image"],
                                 interactive=True,
-                                brush_color=(
-                                    shared.opts.img2img_inpaint_mask_brush_color
-                                    if hasattr(
-                                        shared.opts, "img2img_inpaint_mask_brush_color"
-                                    )
-                                    else None
-                                ),
                             )
                             self.image.preprocess = functools.partial(
                                 svg_preprocess, preprocess=self.image.preprocess
@@ -900,19 +893,17 @@ class ControlNetUiGroup(object):
                     *self.openpose_editor.update(""),
                 )
 
-            img = HWC3(image["image"])
+            img = HWC3(image)
             has_mask = not (
-                (image["mask"][:, :, 0] <= 5).all()
-                or (image["mask"][:, :, 0] >= 250).all()
+                (image[:, :, 0] <= 5).all() or (image[:, :, 0] >= 250).all()
             )
             if "inpaint" in module:
-                color = HWC3(image["image"])
-                alpha = image["mask"][:, :, 0:1]
-                img = np.concatenate([color, alpha], axis=2)
-            elif has_mask and not shared.opts.data.get(
-                "controlnet_ignore_noninpaint_mask", False
-            ):
-                img = HWC3(image["mask"][:, :, 0])
+                # Если изображение имеет маску, то используем её для альфы
+                color = HWC3(image)  # Если вам нужно преобразовать изображение в HWC3
+                alpha = image[:, :, 0:1]  # Маска как первый канал
+                img = np.concatenate([color, alpha], axis=2)  # Объединяем изображение с альфой
+            elif has_mask and not shared.opts.data.get("controlnet_ignore_noninpaint_mask", False):
+                img = HWC3(image[:, :, 0])  # Если маска есть, то используем только её
 
             preprocessor = Preprocessor.get_preprocessor(module)
 

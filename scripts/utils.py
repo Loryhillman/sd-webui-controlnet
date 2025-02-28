@@ -8,6 +8,7 @@ import numpy as np
 import safetensors.torch
 import cv2
 import logging
+import gradio as gr
 
 from typing import Any, Callable, Dict, List
 from modules.safe import unsafe_torch_load
@@ -132,7 +133,7 @@ def svg_preprocess(inputs: Dict, preprocess: Callable):
     if not inputs:
         return None
 
-    if inputs["image"].startswith("data:image/svg+xml;base64,") and svgsupport:
+    if isinstance(inputs, gr.FileData) and inputs.path.startswith("data:image/svg+xml;base64,") and svgsupport:
         svg_data = base64.b64decode(
             inputs["image"].replace("data:image/svg+xml;base64,", "")
         )
