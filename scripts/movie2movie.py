@@ -77,29 +77,44 @@ class Script(scripts.Script):
         return True
 
     def ui(self, is_img2img):
-        # How the script's is displayed in the UI. See https://gradio.app/docs/#components
-        # for the different UI components you can use and how to create them.
-        # Most UI components can return a value, such as a boolean for a checkbox.
-        # The returned values are passed to the run method as parameters.
-        
-        ctrls_group = ()
+        ctrls_group = []  # Используем список вместо кортежа
         max_models = opts.data.get("control_net_unit_count", 3)
 
         with gr.Group():
-            with gr.Accordion("ControlNet-M2M", open = False):
-                duration = gr.Slider(label=f"Duration", value=50.0, minimum=10.0, maximum=200.0, step=10, interactive=True, elem_id='controlnet_movie2movie_duration_slider')
+            with gr.Accordion("ControlNet-M2M", open=False):
+                duration = gr.Slider(
+                    label="Duration",
+                    value=50.0,
+                    minimum=10.0,
+                    maximum=200.0,
+                    step=10,
+                    interactive=True,
+                    elem_id="controlnet_movie2movie_duration_slider"
+                )
                 with gr.Tabs():
                     for i in range(max_models):
                         with gr.Tab(f"ControlNet-{i}"):
                             with gr.TabItem("Movie Input"):
-                                ctrls_group += (gr.Video(format='mp4', source='upload', elem_id = f"video_{i}"), )
+                                ctrls_group.append(
+                                    gr.Video(label=f"Video {i}", format="mp4", interactive=True, elem_id=f"video_{i}")
+                                )
                             with gr.TabItem("Image Input"):
-                                ctrls_group += (gr.Image(source='upload', brush_radius=20, mirror_webcam=False, type='numpy', tool='sketch', elem_id=f'image_{i}'), )
-                            ctrls_group += (gr.Checkbox(label=f"Save preprocessed", value=False, elem_id = f"save_pre_{i}"),)        
-                
-        ctrls_group += (duration,)
+                                ctrls_group.append(
+                                    gr.Image(
+                                        source="upload",
+                                        interactive=True,
+                                        mirror_webcam=False,
+                                        type="numpy",
+                                        elem_id=f"image_{i}",
+                                    )
+                                )
+                            ctrls_group.append(
+                                gr.Checkbox(label="Save preprocessed", value=False, elem_id=f"save_pre_{i}")
+                            )
 
-        return ctrls_group
+        ctrls_group.append(duration)
+
+        return   # Теперь возвращается список
 
     def run(self, p, *args):
         # This is where the additional processing is implemented. The parameters include

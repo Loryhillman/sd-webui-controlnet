@@ -295,13 +295,10 @@ class ControlNetUiGroup(object):
                     with gr.Row(elem_classes=["cnet-image-row"], equal_height=True):
                         with gr.Group(elem_classes=["cnet-input-image-group"]):
                             self.image = gr.Image(
-                                source="upload",
-                                brush_radius=20,
-                                mirror_webcam=False,
-                                type="numpy",
-                                tool="sketch",
+                                image_mode="RGB",
                                 elem_id=f"{elem_id_tabname}_{tabname}_input_image",
                                 elem_classes=["cnet-image"],
+                                interactive=True,
                                 brush_color=(
                                     shared.opts.img2img_inpaint_mask_brush_color
                                     if hasattr(

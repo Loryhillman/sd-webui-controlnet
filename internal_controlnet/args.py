@@ -54,11 +54,19 @@ class ControlNetUnit(BaseModel):
     Represents an entire ControlNet processing unit.
     """
 
+    ext_compat_keys: ClassVar[Dict[str, str]] = {
+        'guessmode': 'guess_mode',
+        'guidance': 'guidance_end',
+        'lowvram': 'low_vram',
+        # Другие пары alias
+    }
+
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         extra="ignore"
-    )
+    )   
 
+    # Пример обновления классовых атрибутов
     cls_match_module: ClassVar[Callable[[str], bool]] = _unimplemented_func
     cls_match_model: ClassVar[Callable[[str], bool]] = _unimplemented_func
     cls_decode_base64: ClassVar[Callable[[str], np.ndarray]] = _unimplemented_func
@@ -66,18 +74,18 @@ class ControlNetUnit(BaseModel):
     cls_get_preprocessor: ClassVar[Callable[[str], Any]] = _unimplemented_func
     cls_logger: ClassVar[Logger] = Logger("ControlNetUnit")
 
-    # UI only fields.
+    # Поля UI
     is_ui: bool = False
     input_mode: InputMode = InputMode.SIMPLE
     batch_images: Optional[Any] = None
     output_dir: str = ""
     loopback: bool = False
 
-    # General fields.
+    # Общие поля
     enabled: bool = False
     module: str = "none"
 
-    @field_validator("module", always=True, pre=True)
+    @field_validator("module")
     @classmethod
     def check_module(cls, value: str) -> str:
         if not ControlNetUnit.cls_match_module(value):
@@ -86,7 +94,17 @@ class ControlNetUnit(BaseModel):
 
     model: str = "None"
 
-    @field_validator("model", always=True, pre=True)
+   # Валидатор для поля "module"
+    @field_validator("module", mode="before")
+    @classmethod
+    def check_module(cls, value: str) -> str:
+        if not ControlNetUnit.cls_match_module(value):
+            raise ValueError(f"module({value}) not found in supported modules.")
+        return value
+
+    model: str = "None"
+
+    @field_validator("model", mode="before")
     @classmethod
     def check_model(cls, value: str) -> str:
         if not ControlNetUnit.cls_match_model(value):
@@ -95,12 +113,11 @@ class ControlNetUnit(BaseModel):
 
     weight: Annotated[float, Field(ge=0.0, le=2.0)] = 1.0
 
-    # The image to be used for this ControlNetUnit.
     image: Optional[Any] = None
-
     resize_mode: ResizeMode = ResizeMode.INNER_FIT
 
-    @field_validator("resize_mode", always=True, pre=True)
+
+    @field_validator("resize_mode", mode="before")
     @classmethod
     def check_resize_mode(cls, value) -> ResizeMode:
         resize_mode_aliases = {
@@ -119,12 +136,11 @@ class ControlNetUnit(BaseModel):
     threshold_a: float = -1
     threshold_b: float = -1
 
+
     @model_validator(mode="before")
     def bound_check_params(cls, values: dict) -> dict:
         """
-        Checks and corrects negative parameters in ControlNetUnit 'unit' in place.
-        Parameters 'processor_res', 'threshold_a', 'threshold_b' are reset to
-        their default values if negative.
+        Проверяет и корректирует негативные параметры в 'unit'.
         """
         enabled = values.get("enabled")
         if not enabled:
@@ -144,7 +160,6 @@ class ControlNetUnit(BaseModel):
             cfg = getattr(preprocessor, param)
             if value < cfg.minimum or value > cfg.maximum:
                 values[unit_param] = cfg.value
-                # Only report warning when non-default value is used.
                 if value != -1:
                     cls.cls_logger.info(
                         f"[{module}.{unit_param}] Invalid value({value}), using default value {cfg.value}."
@@ -158,7 +173,7 @@ class ControlNetUnit(BaseModel):
     def guidance_check(cls, values: dict) -> dict:
         start = values.get("guidance_start")
         end = values.get("guidance_end")
-        if start > end:
+        if start is not None and end is not None and start > end:
             raise ValueError(f"guidance_start({start}) > guidance_end({end})")
         return values
 
@@ -195,7 +210,7 @@ class ControlNetUnit(BaseModel):
     # The effective region mask that unit's effect should be restricted to.
     effective_region_mask: Optional[np.ndarray] = None
 
-    @field_validator("effective_region_mask", pre=True)
+    @field_validator("effective_region_mask", mode="before")
     @classmethod
     def parse_effective_region_mask(cls, value) -> np.ndarray:
         if isinstance(value, str):
@@ -219,7 +234,7 @@ class ControlNetUnit(BaseModel):
     # Currently the option is only accessible in API calls.
     ipadapter_input: Optional[List[Any]] = None
 
-    @field_validator("ipadapter_input", pre=True)
+    @field_validator("ipadapter_input", mode="before")
     @classmethod
     def parse_ipadapter_input(cls, value) -> Optional[List[Any]]:
         if value is None:
