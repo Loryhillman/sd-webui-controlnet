@@ -322,8 +322,8 @@ class Script(scripts.Script, metaclass=(
     def show(self, is_img2img):
         return scripts.AlwaysVisible
 
-    def uigroup(self, tabname: str, is_img2img: bool, elem_id_tabname: str, photopea: Optional[Photopea]) -> Tuple[ControlNetUiGroup, gr.State]:
-        group = ControlNetUiGroup(is_img2img, photopea)
+    def uigroup(self, tabname: str, is_img2img: bool, elem_id_tabname: str) -> Tuple[ControlNetUiGroup, gr.State]:
+        group = ControlNetUiGroup(is_img2img)
         return group, group.render(tabname, elem_id_tabname)
 
     def ui_batch_options(self, is_img2img: bool, elem_id_tabname: str):
@@ -379,18 +379,17 @@ class Script(scripts.Script, metaclass=(
         elem_id_tabname = ("img2img" if is_img2img else "txt2img") + "_controlnet"
         with gr.Group(elem_id=elem_id_tabname):
             with gr.Accordion(f"ControlNet {controlnet_version.version_flag}", open = False, elem_id="controlnet"):
-                photopea = Photopea() if not shared.opts.data.get("controlnet_disable_photopea_edit", False) else None
                 if max_models > 1:
                     with gr.Tabs(elem_id=f"{elem_id_tabname}_tabs"):
                         for i in range(max_models):
                             with gr.Tab(f"ControlNet Unit {i}",
                                         elem_classes=['cnet-unit-tab']):
-                                group, state = self.uigroup(f"ControlNet-{i}", is_img2img, elem_id_tabname, photopea)
+                                group, state = self.uigroup(f"ControlNet-{i}", is_img2img, elem_id_tabname)
                                 ui_groups.append(group)
                                 controls.append(state)
                 else:
                     with gr.Column():
-                        group, state = self.uigroup("ControlNet", is_img2img, elem_id_tabname, photopea)
+                        group, state = self.uigroup("ControlNet", is_img2img, elem_id_tabname)
                         ui_groups.append(group)
                         controls.append(state)
                 with gr.Accordion("Batch Options", open=False, elem_id="controlnet_batch_options"):
